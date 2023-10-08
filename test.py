@@ -1,56 +1,173 @@
-# import os
-# import random
-# from datetime import datetime, timedelta
-# from flask_mail import Mail, Message
-# from werkzeug.security import generate_password_hash, check_password_hash
-# import psycopg2
+import smtplib
 from flask import Flask, render_template, request, session, redirect, url_for, flash
-# import smtplib
-from pymongo.mongo_client import MongoClient
-# import pymongo as Mongo
-app = Flask(__name__)
+import psycopg2
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask_mail import Mail, Message
+from datetime import datetime, timedelta
+import random
+import os
 
+
+# Define the database connection details
+DB_NAME = 'foodsustainability'
+DB_USER = 'postgres'
+DB_PASS = '200117'
+DB_HOST = 'localhost'
+DB_PORT = '5432'
+
+
+app = Flask(__name__, template_folder='templates')
+app.static_folder = 'static'
+app.secret_key = 'mysecretkey'
 
 # @app.route("/")
 # def hello():
 #     # return render_template('allergen.html')
 #     return "Hello world!"
 
-
-# uri = "mongodb+srv://hackuta:rpe5xx3YOUWLXFOc@cluster-01.65uvf4f.mongodb.net/?retryWrites=true&w=majority"
-uri = "mongodb+srv://hackuta:rpe5xx3YOUWLXFOc@cluster-01.nzw7jiq.mongodb.net/?retryWrites=true&w=majority"
-
-# Create a new client and connect to the server
-client = MongoClient(uri)
-
-db = client["left_over_food"]
-users_collection = db["restaurant_info"]
-# Send a ping to confirm a successful connection
-#
+# Define the SQL statement for authenticating a user
+AUTHENTICATE_USER = """
+    SELECT * FROM user_info  
+    WHERE username = %s AND password = %s;
+"""
 
 
-def get_database():
+@app.route('/')
+def login():
+    return render_template('login_new.html')
 
-    # Provide the mongodb atlas url to connect python to mongodb using pymongo
-    CONNECTION_STRING = "mongodb+srv://hackuta:rpe5xx3YOUWLXFOc@cluster-01.nzw7jiq.mongodb.net/?retryWrites=true&w=majority"
 
-    # Create a connection using MongoClient. You can import MongoClient or use pymongo.MongoClient
-    client = MongoClient(CONNECTION_STRING)
-
+def connect_db():
+    conn = None
     try:
-        client.admin.command('ping')
-        print("Pinged your deployment. You successfully connected to MongoDB!")
-    except Exception as e:
-        print(e)
+        conn = psycopg2.connect(
+            dbname=DB_NAME,
+            user=DB_USER,
+            password=DB_PASS,
+            host=DB_HOST,
+            port=DB_PORT
+        )
+        print('Connected to database')
+    except psycopg2.Error as e:
+        print('Error connecting to database:', e)
+    return conn
 
-    # Create the database for our example (we will use the same database throughout the tutorial
-    return client['user_shopping_list']
+
+@app.route('/signup', methods=['GET', 'POST'])
+def signup():
+    if request.method == 'POST':
+        # Get the form data
+        username = request.form['username']
+        password = request.form['password']
+        email = request.form['email']
+        first_name = request.form['first_name']
+        last_name = request.form['last_name']
+        date_of_birth = request.form['date_of_birth']
+        address = request.form['address']
+        phone_number = request.form['phone_number']
+
+        # Check if the username already exists
+        conn = connect_db()
+        cur = conn.cursor()
+        cur.execute('SELECT id FROM user_info WHERE username = %s', (username,))
+        existing_user = cur.fetchone()
+        if existing_user:
+            flash('Username already exists. Please choose another one.')
+            return redirect(url_for('signup'))
+
+        # Insert the user data into the database
+        hashed_password = generate_password_hash(password, method='sha256')
+        cur.execute(
+            'INSERT INTO user_info (username, password, email, first_name, last_name, date_of_birth, address, phone_number) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)',
+            (username, hashed_password, email, first_name,
+             last_name, date_of_birth, address, phone_number)
+        )
+        conn.commit()
+
+        # Set the session data and redirect to the dashboard
+        session['username'] = username
+        flash('Your account has been created!')
+        return redirect(url_for('login'))
+
+    else:
+        return render_template('signup_new.html')
 
 
-db = client["restaurant_db"]
+@app.route('/authenticate', methods=['GET', 'POST'])
+def authenticate():
+    if request.method == 'POST':
+        # Get the form data
+        username = request.form['username']
+        password = request.form['password']
 
-# Access the collection for restaurant owners (create it if it doesn't exist)
-owners_collection = db["restaurant_owners"]
+        # Check if the user exists in the database
+        conn = connect_db()
+        cur = conn.cursor()
+        cur.execute('SELECT * FROM user_info WHERE username = %s', (username,))
+        user = cur.fetchone()
+
+        if not user:
+            flash('Invalid username or password.')
+            return redirect(url_for('login'))
+
+        # Check if the password is correct
+        if not check_password_hash(user[2], password):
+            flash('Invalid username or password.')
+            return redirect(url_for('login'))
+
+        # Set the session data and redirect to the dashboard
+        session['username'] = username
+        session['user_id'] = user[0]
+        return redirect(url_for('dashboard'))
+
+    else:
+        return render_template('login_new.html')
+
+
+@app.route('/dashboard')
+def dashboard():
+    # Check if the user is logged in
+    if 'user_id' in session:
+        # Get the user's information from the database
+        conn = connect_db()
+        cur = conn.cursor()
+        cur.execute('SELECT * FROM user_info WHERE id = %s',
+                    (session['user_id'],))
+        user = cur.fetchone()
+        cur.close()
+        conn.close()
+        return render_template('index.html', user=user)
+    else:
+        return redirect(url_for('login'))
+
+
+@app.route('/map')
+def map():
+    return render_template('map.html')
+
+
+# def get_database():
+
+#     # Provide the mongodb atlas url to connect python to mongodb using pymongo
+#     CONNECTION_STRING = "mongodb+srv://hackuta:rpe5xx3YOUWLXFOc@cluster-01.nzw7jiq.mongodb.net/?retryWrites=true&w=majority"
+
+#     # Create a connection using MongoClient. You can import MongoClient or use pymongo.MongoClient
+#     client = MongoClient(CONNECTION_STRING)
+
+#     try:
+#         client.admin.command('ping')
+#         print("Pinged your deployment. You successfully connected to MongoDB!")
+#     except Exception as e:
+#         print(e)
+
+#     # Create the database for our example (we will use the same database throughout the tutorial
+#     return client['user_shopping_list']
+
+
+# db = client["restaurant_db"]
+
+# # Access the collection for restaurant owners (create it if it doesn't exist)
+# owners_collection = db["restaurant_owners"]
 
 # # Sample data for a restaurant owner
 # restaurant_owner_data = {
@@ -126,46 +243,14 @@ def get_store_info(user_id):
 # Dummy user authentication function (replace with your authentication logic)
 
 
-def authenticate_user(username, password):
-    user = users_collection.find_one({"username": username})
-    if user and user["password"] == password:
-        return True
-    return False
-
-
-@app.route('/')
-def index():
-    # Check if the user is authenticated
-    if not authenticate_user("sample_user", "sample_password"):
-        return redirect(url_for('login'))
-
-    user_id = "sample_user"  # Replace with actual user ID
-    store_info = get_store_info(user_id)
-
-    if "error" in store_info:
-        return "Unauthorized access"
-
-    return render_template('store_info.html', store_info=store_info)
-
-
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        username = request.form['username']
-        password = request.form['password']
-
-        if authenticate_user(username, password):
-            # Store the username in the session to mark the user as authenticated
-            session['username'] = username
-            return redirect(url_for('index'))
-        else:
-            error = "Invalid credentials. Please try again."
-            return render_template('login.html', error=error)
-
-    return render_template('login.html')
+@app.route('/logout')
+def logout():
+    # Clear the user's ID from the session
+    session.pop('user_id', None)
+    return redirect(url_for('login'))
 
 
 if __name__ == '__main__':
-    dbname = get_database()
-    collection_name = dbname["user_1_items"]
+    # dbname = get_database()
+    # collection_name = dbname["user_1_items"]
     app.run(debug=True)
