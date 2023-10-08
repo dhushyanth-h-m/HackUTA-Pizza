@@ -1,12 +1,12 @@
+
 from pymongo.mongo_client import MongoClient
 from flask import Flask
-# import pymongo as Mongo
 app = Flask(__name__)
 
 
 @app.route("/")
 def hello():
-    return "Hello World!"
+    return render_template("index2.html")
 
 
 uri = "mongodb+srv://hackuta:rpe5xx3YOUWLXFOc@cluster-01.65uvf4f.mongodb.net/?retryWrites=true&w=majority"
